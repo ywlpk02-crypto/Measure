@@ -1,0 +1,1252 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MeasureAI — วัดขนาดจากกล้อง</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+
+  :root {
+    --navy: #0a0e1a;
+    --navy-mid: #111827;
+    --navy-light: #1c2740;
+    --cyan: #00e5ff;
+    --cyan-dim: #00b8cc;
+    --cyan-glow: rgba(0,229,255,0.15);
+    --amber: #ffc233;
+    --pink: #ff6b9d;
+    --white: #e8f0fe;
+    --muted: #6b7a99;
+    --border: rgba(0,229,255,0.2);
+    --danger: #ff4d6d;
+    --success: #00e676;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--navy);
+    color: var(--white);
+    font-family: 'Space Grotesk', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(10,14,26,0.95);
+    backdrop-filter: blur(10px);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'Space Mono', monospace;
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .logo-icon {
+    width: 32px; height: 32px;
+    border: 2px solid var(--cyan);
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+  }
+  .logo-icon::before, .logo-icon::after {
+    content: ''; position: absolute; background: var(--cyan);
+  }
+  .logo-icon::before { width: 14px; height: 2px; }
+  .logo-icon::after  { width: 2px; height: 14px; }
+  .logo span { color: var(--cyan); }
+
+  .badge {
+    font-size: 11px;
+    font-family: 'Space Mono', monospace;
+    background: var(--cyan-glow);
+    border: 1px solid var(--border);
+    color: var(--cyan);
+    padding: 3px 10px;
+    border-radius: 20px;
+  }
+
+  /* ── Mode tabs ── */
+  .mode-tabs {
+    display: flex;
+    gap: 0;
+    background: var(--navy-light);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 4px;
+    margin: 0 24px 0 0;
+  }
+  .mode-tab {
+    border: none;
+    background: none;
+    color: var(--muted);
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 18px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+  .mode-tab.active {
+    background: var(--cyan);
+    color: var(--navy);
+  }
+
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    max-width: 1200px;
+    margin: 0 auto;
+    width: 100%;
+    padding: 24px;
+    gap: 24px;
+  }
+
+  .camera-panel { display: flex; flex-direction: column; gap: 16px; }
+
+  .viewfinder {
+    position: relative;
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    aspect-ratio: 4/3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #videoEl {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  #canvasEl { display: none; }
+
+  /* The interactive canvas overlay for distance mode */
+  #distCanvas {
+    position: absolute;
+    inset: 0;
+    width: 100%; height: 100%;
+    cursor: crosshair;
+    display: none;
+  }
+  #distCanvas.active { display: block; }
+
+  .bracket {
+    position: absolute;
+    width: 28px; height: 28px;
+    border-color: var(--cyan);
+    border-style: solid;
+    opacity: 0.6;
+    pointer-events: none;
+  }
+  .bracket.tl { top: 16px; left: 16px; border-width: 2px 0 0 2px; }
+  .bracket.tr { top: 16px; right: 16px; border-width: 2px 2px 0 0; }
+  .bracket.bl { bottom: 16px; left: 16px; border-width: 0 0 2px 2px; }
+  .bracket.br { bottom: 16px; right: 16px; border-width: 0 2px 2px 0; }
+
+  .scanline {
+    position: absolute; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+    animation: scan 3s linear infinite; opacity: 0;
+    pointer-events: none;
+  }
+  .viewfinder.active .scanline { opacity: 0.4; }
+  @keyframes scan { 0% { top:10%; } 100% { top:90%; } }
+
+  .cam-placeholder {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 12px; color: var(--muted);
+    pointer-events: none;
+  }
+  .cam-placeholder svg { opacity: 0.4; }
+  .cam-placeholder p { font-size: 14px; }
+
+  .processing-overlay {
+    position: absolute; inset: 0;
+    background: rgba(10,14,26,0.85);
+    display: none; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 16px; border-radius: 12px;
+  }
+  .processing-overlay.show { display: flex; }
+  .spinner {
+    width: 48px; height: 48px;
+    border: 3px solid rgba(0,229,255,0.2);
+    border-top-color: var(--cyan);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .processing-overlay p {
+    font-family: 'Space Mono', monospace; font-size: 13px;
+    color: var(--cyan); letter-spacing: 1px;
+  }
+
+  /* Dist mode hint */
+  .dist-hint {
+    position: absolute;
+    top: 12px; left: 50%; transform: translateX(-50%);
+    background: rgba(10,14,26,0.85);
+    border: 1px solid var(--border);
+    color: var(--cyan);
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    pointer-events: none;
+    white-space: nowrap;
+    display: none;
+    letter-spacing: 0.5px;
+  }
+  .dist-hint.show { display: block; }
+
+  /* Controls */
+  .cam-controls {
+    display: flex; gap: 12px;
+    align-items: center; justify-content: center; flex-wrap: wrap;
+  }
+
+  .btn {
+    border: none; cursor: pointer;
+    font-family: 'Space Grotesk', sans-serif; font-weight: 600;
+    border-radius: 8px; transition: all 0.2s;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .btn-secondary {
+    background: var(--navy-light); color: var(--white);
+    border: 1px solid var(--border); padding: 11px 20px; font-size: 14px;
+  }
+  .btn-secondary:hover:not(:disabled) { border-color: var(--cyan); color: var(--cyan); }
+
+  .btn-capture {
+    width: 64px; height: 64px; border-radius: 50%;
+    background: var(--cyan); color: var(--navy); font-size: 24px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 0 4px rgba(0,229,255,0.2), 0 0 24px rgba(0,229,255,0.4);
+    flex-shrink: 0;
+  }
+  .btn-capture:hover:not(:disabled) {
+    box-shadow: 0 0 0 6px rgba(0,229,255,0.3), 0 0 36px rgba(0,229,255,0.5);
+    transform: scale(1.05);
+  }
+  .btn-capture.dist-mode { background: var(--amber); box-shadow: 0 0 0 4px rgba(255,194,51,0.2), 0 0 24px rgba(255,194,51,0.4); }
+
+  .btn-amber {
+    background: rgba(255,194,51,0.15); color: var(--amber);
+    border: 1px solid rgba(255,194,51,0.3); padding: 11px 20px; font-size: 14px;
+  }
+  .btn-amber:hover:not(:disabled) { background: rgba(255,194,51,0.25); }
+
+  /* Reference bar */
+  .reference-bar {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--navy-light); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 16px; font-size: 14px;
+  }
+  .reference-bar label { color: var(--muted); white-space: nowrap; font-size: 13px; }
+  .reference-bar input {
+    flex: 1; background: none; border: none;
+    color: var(--white); font-family: 'Space Mono', monospace; font-size: 14px; outline: none;
+  }
+  .reference-bar input::placeholder { color: var(--muted); }
+  .unit-selector { display: flex; gap: 4px; }
+  .unit-btn {
+    background: none; border: 1px solid transparent; color: var(--muted);
+    font-family: 'Space Mono', monospace; font-size: 12px;
+    padding: 4px 10px; border-radius: 6px; cursor: pointer; transition: all 0.15s;
+  }
+  .unit-btn.active { border-color: var(--cyan); color: var(--cyan); background: var(--cyan-glow); }
+
+  /* ── Result panel ── */
+  .result-panel { display: flex; flex-direction: column; gap: 16px; }
+  .panel-title {
+    font-family: 'Space Mono', monospace; font-size: 11px;
+    letter-spacing: 2px; color: var(--muted); text-transform: uppercase;
+  }
+
+  /* Section toggle */
+  .result-section { display: none; flex-direction: column; gap: 14px; }
+  .result-section.show { display: flex; }
+
+  /* Dimension cards */
+  .dim-cards { display: flex; flex-direction: column; gap: 10px; }
+  .dim-card {
+    background: var(--navy-light); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px;
+    display: flex; align-items: center; gap: 14px;
+    position: relative; overflow: hidden; transition: border-color 0.3s;
+  }
+  .dim-card.has-value { border-color: rgba(0,229,255,0.4); }
+  .dim-card::before {
+    content: ''; position: absolute; left:0; top:0; bottom:0;
+    width: 3px; background: var(--muted); transition: background 0.3s;
+  }
+  .dim-card.width::before  { background: var(--pink); }
+  .dim-card.height::before { background: var(--cyan); }
+  .dim-card.depth::before  { background: var(--amber); }
+  .dim-icon {
+    width: 36px; height: 36px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; flex-shrink: 0;
+  }
+  .dim-card.width  .dim-icon { background: rgba(255,107,157,0.15); }
+  .dim-card.height .dim-icon { background: var(--cyan-glow); }
+  .dim-card.depth  .dim-icon { background: rgba(255,194,51,0.15); }
+  .dim-info { flex: 1; }
+  .dim-label { font-size: 11px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 2px; }
+  .dim-value {
+    font-family: 'Space Mono', monospace; font-size: 26px;
+    font-weight: 700; color: var(--white); line-height: 1;
+  }
+  .dim-value.loading { font-size: 20px; color: var(--muted); animation: pulse 1.5s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:0.4} 50%{opacity:1} }
+  .dim-unit { font-size: 13px; color: var(--muted); margin-top: 2px; font-family: 'Space Mono', monospace; }
+
+  /* Distance result card */
+  .dist-result-card {
+    background: linear-gradient(135deg, rgba(255,194,51,0.08), rgba(255,194,51,0.03));
+    border: 1px solid rgba(255,194,51,0.3);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .dist-result-card::before {
+    content: ''; position: absolute; inset: 0;
+    background: radial-gradient(circle at 50% 0%, rgba(255,194,51,0.1), transparent 70%);
+  }
+  .dist-big {
+    font-family: 'Space Mono', monospace;
+    font-size: 48px; font-weight: 700;
+    color: var(--amber); line-height: 1;
+    text-shadow: 0 0 24px rgba(255,194,51,0.5);
+  }
+  .dist-big.loading { font-size: 36px; color: var(--muted); animation: pulse 1.5s ease-in-out infinite; }
+  .dist-unit-label { font-size: 14px; color: rgba(255,194,51,0.7); margin-top: 4px; font-family: 'Space Mono', monospace; }
+  .dist-sub { font-size: 12px; color: var(--muted); margin-top: 10px; }
+
+  /* Points display */
+  .points-display {
+    display: flex; gap: 10px; align-items: center;
+    background: var(--navy-light); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px;
+  }
+  .point-chip {
+    flex: 1; text-align: center;
+    background: rgba(0,0,0,0.3); border-radius: 8px; padding: 10px;
+  }
+  .point-chip-label { font-size: 10px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
+  .point-chip-val { font-family: 'Space Mono', monospace; font-size: 13px; }
+  .point-chip.a .point-chip-val { color: var(--success); }
+  .point-chip.b .point-chip-val { color: var(--pink); }
+  .point-arrow { color: var(--muted); font-size: 18px; }
+
+  /* Step instructions */
+  .step-list { display: flex; flex-direction: column; gap: 8px; }
+  .step-item {
+    display: flex; gap: 10px; align-items: flex-start;
+    font-size: 13px; color: var(--muted); line-height: 1.5;
+  }
+  .step-num {
+    width: 20px; height: 20px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; flex-shrink: 0;
+    background: var(--navy-light); border: 1px solid var(--border);
+    font-family: 'Space Mono', monospace;
+    margin-top: 1px;
+  }
+  .step-num.done { background: var(--cyan-glow); border-color: var(--cyan); color: var(--cyan); }
+  .step-num.active { background: rgba(255,194,51,0.15); border-color: var(--amber); color: var(--amber); }
+
+  /* Confidence */
+  .confidence-bar-wrap {
+    background: var(--navy-light); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .conf-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-size: 12px; }
+  .conf-label { color: var(--muted); font-family: 'Space Mono', monospace; letter-spacing: 1px; }
+  .conf-pct   { color: var(--cyan); font-family: 'Space Mono', monospace; font-weight: 700; }
+  .conf-bar { height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; }
+  .conf-fill {
+    height: 100%; border-radius: 3px;
+    background: linear-gradient(90deg, var(--cyan-dim), var(--cyan));
+    width: 0%; transition: width 1s cubic-bezier(0.4,0,0.2,1);
+  }
+
+  .ai-notes {
+    background: var(--navy-light); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px; flex: 1;
+  }
+  .ai-notes-text { font-size: 13px; color: var(--muted); line-height: 1.7; font-style: italic; }
+  .ai-notes-text.loaded { color: #a8b8d0; font-style: normal; }
+
+  .tips {
+    background: rgba(0,229,255,0.04); border: 1px solid rgba(0,229,255,0.12);
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .tips-title { font-size: 11px; color: var(--cyan); letter-spacing: 1.5px; text-transform: uppercase; font-family: 'Space Mono', monospace; margin-bottom: 10px; }
+  .tip-item { display: flex; gap: 8px; font-size: 12px; color: var(--muted); margin-bottom: 6px; line-height: 1.5; }
+  .tip-dot { width:4px; height:4px; border-radius:50%; background:var(--cyan); flex-shrink:0; margin-top:6px; opacity:0.5; }
+
+  .status-dot { width:8px; height:8px; border-radius:50%; background:var(--muted); display:inline-block; }
+  .status-dot.live { background:var(--success); animation: blink 1.5s ease-in-out infinite; }
+  .status-dot.error { background:var(--danger); }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  .toast {
+    position: fixed; bottom: 24px; left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--navy-light); border: 1px solid var(--border);
+    padding: 12px 20px; border-radius: 10px;
+    font-size: 13px; color: var(--white);
+    transition: transform 0.3s; z-index: 200;
+    display: flex; align-items: center; gap: 8px;
+    white-space: nowrap; box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.error { border-color: rgba(255,77,109,0.4); color: #ff8fa3; }
+  .toast.success { border-color: rgba(0,230,118,0.4); color: var(--success); }
+
+  #capturedImg {
+    width:100%; height:100%; object-fit:contain;
+    display:none; position:absolute; inset:0;
+  }
+
+  @media (max-width: 768px) {
+    main { grid-template-columns: 1fr; padding: 16px; }
+    .mode-tabs { margin: 0; }
+    .dist-big { font-size: 36px; }
+    header { flex-wrap: wrap; gap: 10px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon"></div>
+    Measure<span>AI</span>
+  </div>
+  <div class="mode-tabs">
+    <button class="mode-tab active" id="tabSize" onclick="switchMode('size')">
+      📐 วัดขนาด
+    </button>
+    <button class="mode-tab" id="tabDist" onclick="switchMode('dist')">
+      📏 วัดระยะทาง
+    </button>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <span class="status-dot" id="statusDot"></span>
+    <span id="statusText" style="font-size:12px;color:var(--muted);font-family:'Space Mono',monospace">รอเชื่อมกล้อง</span>
+    <span class="badge">AI</span>
+  </div>
+</header>
+
+<main>
+  <!-- Camera side -->
+  <div class="camera-panel">
+    <div class="viewfinder" id="viewfinder">
+      <video id="videoEl" autoplay playsinline muted></video>
+      <img id="capturedImg" alt="captured">
+      <canvas id="canvasEl"></canvas>
+      <!-- Interactive canvas for distance mode -->
+      <canvas id="distCanvas"></canvas>
+
+      <div class="bracket tl"></div>
+      <div class="bracket tr"></div>
+      <div class="bracket bl"></div>
+      <div class="bracket br"></div>
+      <div class="scanline"></div>
+
+      <!-- Hint label -->
+      <div class="dist-hint" id="distHint">แตะจุด A บนภาพ</div>
+
+      <div class="cam-placeholder" id="placeholder">
+        <svg width="56" height="56" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.2">
+          <path d="M15 10l4.553-2.069A1 1 0 0121 8.87v6.26a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/>
+        </svg>
+        <p>กด "เปิดกล้อง" เพื่อเริ่มต้น</p>
+      </div>
+
+      <div class="processing-overlay" id="processingOverlay">
+        <div class="spinner"></div>
+        <p id="processingMsg">ANALYZING...</p>
+      </div>
+    </div>
+
+    <!-- Reference bar (size mode only) -->
+    <div class="reference-bar" id="refBar">
+      <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color:var(--cyan);flex-shrink:0">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/>
+      </svg>
+      <label>วัตถุอ้างอิง:</label>
+      <input id="refName" type="text" placeholder="เช่น บัตรเครดิต, เหรียญ 1 บาท…" value="บัตรเครดิต (85.6×54mm)">
+      <div class="unit-selector">
+        <button class="unit-btn active" data-unit="cm">cm</button>
+        <button class="unit-btn" data-unit="mm">mm</button>
+        <button class="unit-btn" data-unit="inch">นิ้ว</button>
+      </div>
+    </div>
+
+    <!-- Unit bar for distance mode -->
+    <div class="reference-bar" id="distRefBar" style="display:none">
+      <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color:var(--amber);flex-shrink:0">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
+      </svg>
+      <label>อ้างอิงระยะ:</label>
+      <input id="distRefName" type="text" placeholder="เช่น ประตู (2 เมตร), รถยนต์ (4.5 เมตร)…" value="ความสูงคน (1.7 เมตร)">
+      <div class="unit-selector">
+        <button class="unit-btn dist-unit-btn active" data-unit="เมตร">เมตร</button>
+        <button class="unit-btn dist-unit-btn" data-unit="ซม.">ซม.</button>
+        <button class="unit-btn dist-unit-btn" data-unit="ฟุต">ฟุต</button>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="cam-controls">
+      <button class="btn btn-secondary" id="startBtn" onclick="startCamera()">
+        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path d="M15 10l4.553-2.069A1 1 0 0121 8.87v6.26a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/>
+        </svg>
+        เปิดกล้อง
+      </button>
+
+      <button class="btn btn-capture" id="captureBtn" onclick="onCaptureClick()" disabled title="ถ่ายภาพ">
+        📷
+      </button>
+
+      <button class="btn btn-secondary" id="retakeBtn" onclick="retake()" style="display:none">
+        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        ถ่ายใหม่
+      </button>
+
+      <button class="btn btn-amber" id="clearPtsBtn" onclick="clearPoints()" style="display:none">
+        ✕ ล้างจุด
+      </button>
+    </div>
+  </div>
+
+  <!-- Result panel -->
+  <div class="result-panel">
+    <div class="panel-title" id="resultTitle">ผลการวัดขนาด</div>
+
+    <!-- SIZE MODE results -->
+    <div class="result-section show" id="sizeResults">
+      <div class="dim-cards">
+        <div class="dim-card width" id="cardW">
+          <div class="dim-icon">↔</div>
+          <div class="dim-info">
+            <div class="dim-label">ความกว้าง (Width)</div>
+            <div class="dim-value" id="valW">—</div>
+            <div class="dim-unit" id="unitW"></div>
+          </div>
+        </div>
+        <div class="dim-card height" id="cardH">
+          <div class="dim-icon">↕</div>
+          <div class="dim-info">
+            <div class="dim-label">ความสูง (Height)</div>
+            <div class="dim-value" id="valH">—</div>
+            <div class="dim-unit" id="unitH"></div>
+          </div>
+        </div>
+        <div class="dim-card depth" id="cardD">
+          <div class="dim-icon">⬡</div>
+          <div class="dim-info">
+            <div class="dim-label">ความลึก/หนา (Depth)</div>
+            <div class="dim-value" id="valD">—</div>
+            <div class="dim-unit" id="unitD"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="confidence-bar-wrap">
+        <div class="conf-header">
+          <span class="conf-label">CONFIDENCE</span>
+          <span class="conf-pct" id="confPct">—</span>
+        </div>
+        <div class="conf-bar"><div class="conf-fill" id="confFill"></div></div>
+      </div>
+
+      <div class="ai-notes">
+        <div class="panel-title" style="margin-bottom:10px">หมายเหตุจาก AI</div>
+        <div class="ai-notes-text" id="aiNotes">ถ่ายภาพวัตถุพร้อมวัตถุอ้างอิงเพื่อให้ AI วิเคราะห์ขนาด</div>
+      </div>
+
+      <div class="tips">
+        <div class="tips-title">คำแนะนำ</div>
+        <div class="tip-item"><div class="tip-dot"></div><span>วางวัตถุอ้างอิง (เช่น บัตรเครดิต) ไว้ข้างๆ วัตถุที่ต้องการวัด</span></div>
+        <div class="tip-item"><div class="tip-dot"></div><span>ถ่ายจากมุมตั้งฉาก เห็นวัตถุชัดเจน มีแสงเพียงพอ</span></div>
+        <div class="tip-item"><div class="tip-dot"></div><span>ความลึก/ความหนาเป็นการประมาณจาก perspective ในภาพ</span></div>
+      </div>
+    </div>
+
+    <!-- DISTANCE MODE results -->
+    <div class="result-section" id="distResults">
+
+      <!-- Step guide -->
+      <div class="step-list" id="stepGuide">
+        <div class="step-item">
+          <div class="step-num active" id="step1num">1</div>
+          <span id="step1txt">ถ่ายภาพฉากที่ต้องการวัดระยะ แล้วกดปุ่มกล้อง</span>
+        </div>
+        <div class="step-item">
+          <div class="step-num" id="step2num">2</div>
+          <span id="step2txt">แตะ <b style="color:var(--success)">จุด A</b> บนภาพ (จุดเริ่มต้น)</span>
+        </div>
+        <div class="step-item">
+          <div class="step-num" id="step3num">3</div>
+          <span id="step3txt">แตะ <b style="color:var(--pink)">จุด B</b> (จุดปลาย) แล้ว AI จะคำนวณระยะ</span>
+        </div>
+      </div>
+
+      <!-- Points display -->
+      <div class="points-display">
+        <div class="point-chip a">
+          <div class="point-chip-label">จุด A</div>
+          <div class="point-chip-val" id="pointALabel">ยังไม่ได้เลือก</div>
+        </div>
+        <div class="point-arrow">→</div>
+        <div class="point-chip b">
+          <div class="point-chip-label">จุด B</div>
+          <div class="point-chip-val" id="pointBLabel">ยังไม่ได้เลือก</div>
+        </div>
+      </div>
+
+      <!-- Distance result -->
+      <div class="dist-result-card">
+        <div class="dist-big" id="distValue">—</div>
+        <div class="dist-unit-label" id="distUnitLabel">แตะสองจุดเพื่อวัดระยะ</div>
+        <div class="dist-sub" id="distSub"></div>
+      </div>
+
+      <div class="confidence-bar-wrap">
+        <div class="conf-header">
+          <span class="conf-label">CONFIDENCE</span>
+          <span class="conf-pct" id="distConfPct">—</span>
+        </div>
+        <div class="conf-bar"><div class="conf-fill" id="distConfFill"></div></div>
+      </div>
+
+      <div class="ai-notes">
+        <div class="panel-title" style="margin-bottom:10px">หมายเหตุจาก AI</div>
+        <div class="ai-notes-text" id="distNotes">เลือกโหมดวัดระยะและถ่ายภาพฉากที่ต้องการ</div>
+      </div>
+
+      <div class="tips">
+        <div class="tips-title">คำแนะนำ</div>
+        <div class="tip-item"><div class="tip-dot"></div><span>ระบุวัตถุอ้างอิงที่รู้ขนาด เช่น ประตู รถยนต์ หรือคน</span></div>
+        <div class="tip-item"><div class="tip-dot"></div><span>ยิ่งมีวัตถุอ้างอิงในภาพชัดเจน ผลยิ่งแม่นยำ</span></div>
+        <div class="tip-item"><div class="tip-dot"></div><span>เหมาะสำหรับการประมาณระยะห่างระหว่างวัตถุในฉากเดียวกัน</span></div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── State ──
+let stream = null;
+let activeUnit = 'cm';
+let activeDistUnit = 'เมตร';
+let currentMode = 'size'; // 'size' | 'dist'
+let distPhase = 'idle'; // 'idle' | 'captured' | 'pointA' | 'pointB' | 'analyzing'
+let pointA = null; // {x,y} in canvas pct
+let pointB = null;
+let capturedImageData = null;
+
+// ── Unit toggles ──
+document.querySelectorAll('.unit-btn:not(.dist-unit-btn)').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.unit-btn:not(.dist-unit-btn)').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeUnit = btn.dataset.unit;
+  });
+});
+document.querySelectorAll('.dist-unit-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.dist-unit-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeDistUnit = btn.dataset.unit;
+  });
+});
+
+// ── Mode switch ──
+function switchMode(mode) {
+  currentMode = mode;
+  document.getElementById('tabSize').classList.toggle('active', mode === 'size');
+  document.getElementById('tabDist').classList.toggle('active', mode === 'dist');
+  document.getElementById('refBar').style.display     = mode === 'size' ? '' : 'none';
+  document.getElementById('distRefBar').style.display = mode === 'dist' ? '' : 'none';
+  document.getElementById('sizeResults').classList.toggle('show', mode === 'size');
+  document.getElementById('distResults').classList.toggle('show', mode === 'dist');
+  document.getElementById('resultTitle').textContent = mode === 'size' ? 'ผลการวัดขนาด' : 'ผลการวัดระยะทาง';
+
+  const captureBtn = document.getElementById('captureBtn');
+  if (mode === 'dist') {
+    captureBtn.classList.add('dist-mode');
+    captureBtn.textContent = '📷';
+  } else {
+    captureBtn.classList.remove('dist-mode');
+    captureBtn.textContent = '📷';
+  }
+
+  // Reset dist if switching back
+  if (mode === 'size') {
+    hideDistCanvas();
+  }
+}
+
+// ── Status / Toast ──
+function setStatus(type, text) {
+  document.getElementById('statusDot').className = 'status-dot ' + type;
+  document.getElementById('statusText').textContent = text;
+}
+
+function showToast(msg, type = '') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast ' + type + ' show';
+  setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+// ── Camera ──
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 960 } }
+    });
+    const video = document.getElementById('videoEl');
+    video.srcObject = stream;
+    video.style.display = 'block';
+    document.getElementById('placeholder').style.display = 'none';
+    document.getElementById('captureBtn').disabled = false;
+    document.getElementById('startBtn').style.display = 'none';
+    document.getElementById('viewfinder').classList.add('active');
+    setStatus('live', 'กล้องพร้อมใช้งาน');
+    showToast('🎥 กล้องเชื่อมต่อสำเร็จ', 'success');
+  } catch (e) {
+    setStatus('error', 'ไม่สามารถเข้าถึงกล้อง');
+    showToast('❌ ' + e.message, 'error');
+  }
+}
+
+// ── Capture handler ──
+function onCaptureClick() {
+  if (currentMode === 'size') {
+    captureAndMeasureSize();
+  } else {
+    captureForDistance();
+  }
+}
+
+// ─────────────────────────────────────
+// SIZE MODE
+// ─────────────────────────────────────
+function setLoadingState() {
+  ['W','H','D'].forEach(k => {
+    const v = document.getElementById('val'+k);
+    v.textContent = '···'; v.className = 'dim-value loading';
+    document.getElementById('unit'+k).textContent = '';
+    document.getElementById('card'+k).classList.remove('has-value');
+  });
+  document.getElementById('confPct').textContent = '—';
+  document.getElementById('confFill').style.width = '0%';
+  document.getElementById('aiNotes').textContent = 'กำลังวิเคราะห์…';
+  document.getElementById('aiNotes').className = 'ai-notes-text';
+}
+
+function setResults(data) {
+  const u = activeUnit;
+  const setCard = (key, value) => {
+    const v = document.getElementById('val'+key);
+    v.textContent = value || '?'; v.className = 'dim-value';
+    document.getElementById('unit'+key).textContent = value ? u : '(ประมาณ)';
+    document.getElementById('card'+key).classList.add('has-value');
+  };
+  setCard('W', data.width); setCard('H', data.height); setCard('D', data.depth || data.thickness);
+  const conf = Math.round((data.confidence || 0.7) * 100);
+  document.getElementById('confPct').textContent = conf + '%';
+  document.getElementById('confFill').style.width = conf + '%';
+  const n = document.getElementById('aiNotes');
+  n.textContent = data.notes || 'วิเคราะห์เสร็จสิ้น';
+  n.className = 'ai-notes-text loaded';
+}
+
+async function captureAndMeasureSize() {
+  const video = document.getElementById('videoEl');
+  const canvas = document.getElementById('canvasEl');
+  const ctx = canvas.getContext('2d');
+  canvas.width = video.videoWidth || 1280;
+  canvas.height = video.videoHeight || 960;
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  const imgData = canvas.toDataURL('image/jpeg', 0.85);
+  showCapturedImage(imgData);
+
+  const overlay = document.getElementById('processingOverlay');
+  overlay.classList.add('show');
+  setLoadingState();
+
+  const msgs = ['DETECTING OBJECT…', 'ANALYZING SCALE…', 'COMPUTING DIMENSIONS…'];
+  let mi = 0;
+  const msgInterval = setInterval(() => {
+    document.getElementById('processingMsg').textContent = msgs[mi++ % msgs.length];
+  }, 900);
+
+  const refName = document.getElementById('refName').value || 'บัตรเครดิต';
+  const unit = activeUnit;
+  const base64 = imgData.split(',')[1];
+
+  const prompt = `You are an expert object dimension estimator. Analyze this image.
+Reference object: "${refName}". Target unit: ${unit}.
+Return ONLY valid JSON:
+{"width":"12.5","height":"8.3","depth":"3.1","confidence":0.82,"object":"ชื่อวัตถุ (ไทย)","notes":"คำอธิบาย 1-2 ประโยค ภาษาไทย"}
+Rules: values are strings with 1 decimal in ${unit}. If depth unknown put "N/A". notes in Thai.`;
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6', max_tokens: 1000,
+        messages: [{role:'user', content:[
+          {type:'image', source:{type:'base64', media_type:'image/jpeg', data:base64}},
+          {type:'text', text:prompt}
+        ]}]
+      })
+    });
+    clearInterval(msgInterval);
+    const data = await response.json();
+    if (data.error) throw new Error(data.error.message);
+    const raw = data.content.map(c=>c.text||'').join('');
+    const parsed = JSON.parse(raw.replace(/```json|```/g,'').trim());
+    overlay.classList.remove('show');
+    setResults(parsed);
+    setStatus('live', 'วิเคราะห์เสร็จสิ้น');
+    showToast('✅ วัดขนาดสำเร็จ', 'success');
+  } catch(err) {
+    clearInterval(msgInterval);
+    overlay.classList.remove('show');
+    setStatus('error', 'เกิดข้อผิดพลาด');
+    showToast('❌ ' + err.message, 'error');
+    document.getElementById('aiNotes').textContent = 'เกิดข้อผิดพลาด: ' + err.message;
+    ['W','H','D'].forEach(k => {
+      document.getElementById('val'+k).textContent = '—';
+      document.getElementById('val'+k).className = 'dim-value';
+    });
+  }
+}
+
+// ─────────────────────────────────────
+// DISTANCE MODE
+// ─────────────────────────────────────
+function captureForDistance() {
+  const video = document.getElementById('videoEl');
+  const canvas = document.getElementById('canvasEl');
+  const ctx = canvas.getContext('2d');
+  canvas.width = video.videoWidth || 1280;
+  canvas.height = video.videoHeight || 960;
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  capturedImageData = canvas.toDataURL('image/jpeg', 0.85);
+
+  showCapturedImage(capturedImageData);
+  initDistCanvas();
+  distPhase = 'pointA';
+  pointA = null; pointB = null;
+  updateStepUI();
+  document.getElementById('distHint').textContent = '📍 แตะจุด A (จุดเริ่มต้น)';
+  document.getElementById('distHint').classList.add('show');
+  document.getElementById('clearPtsBtn').style.display = '';
+  document.getElementById('captureBtn').style.display = 'none';
+  setStatus('live', 'เลือกจุดวัด');
+  showToast('📍 แตะจุด A บนภาพ', '');
+}
+
+function initDistCanvas() {
+  const dc = document.getElementById('distCanvas');
+  const vf = document.getElementById('viewfinder');
+  dc.classList.add('active');
+  dc.width  = vf.offsetWidth;
+  dc.height = vf.offsetHeight;
+  dc.addEventListener('click', onDistCanvasClick);
+  dc.addEventListener('touchend', onDistCanvasTouch, {passive:false});
+}
+
+function hideDistCanvas() {
+  const dc = document.getElementById('distCanvas');
+  dc.classList.remove('active');
+  dc.removeEventListener('click', onDistCanvasClick);
+  dc.removeEventListener('touchend', onDistCanvasTouch);
+  document.getElementById('distHint').classList.remove('show');
+  document.getElementById('clearPtsBtn').style.display = 'none';
+}
+
+function onDistCanvasTouch(e) {
+  e.preventDefault();
+  const touch = e.changedTouches[0];
+  const dc = document.getElementById('distCanvas');
+  const rect = dc.getBoundingClientRect();
+  handleDistTap(touch.clientX - rect.left, touch.clientY - rect.top, dc);
+}
+
+function onDistCanvasClick(e) {
+  const dc = document.getElementById('distCanvas');
+  const rect = dc.getBoundingClientRect();
+  handleDistTap(e.clientX - rect.left, e.clientY - rect.top, dc);
+}
+
+function handleDistTap(x, y, dc) {
+  if (distPhase === 'pointA') {
+    pointA = { x: x / dc.width, y: y / dc.height, px: x, py: y };
+    document.getElementById('pointALabel').textContent = `(${Math.round(x)}, ${Math.round(y)})`;
+    distPhase = 'pointB';
+    document.getElementById('distHint').textContent = '📍 แตะจุด B (จุดปลาย)';
+    updateStepUI();
+    drawDistOverlay();
+    showToast('📍 ดี! ตอนนี้แตะจุด B', '');
+  } else if (distPhase === 'pointB') {
+    pointB = { x: x / dc.width, y: y / dc.height, px: x, py: y };
+    document.getElementById('pointBLabel').textContent = `(${Math.round(x)}, ${Math.round(y)})`;
+    distPhase = 'analyzing';
+    document.getElementById('distHint').classList.remove('show');
+    updateStepUI();
+    drawDistOverlay();
+    analyzeDistance();
+  }
+}
+
+function drawDistOverlay() {
+  const dc = document.getElementById('distCanvas');
+  const ctx = dc.getContext('2d');
+  ctx.clearRect(0, 0, dc.width, dc.height);
+
+  const drawPoint = (p, color, label) => {
+    // glow
+    ctx.beginPath();
+    ctx.arc(p.px, p.py, 18, 0, Math.PI*2);
+    ctx.fillStyle = color.replace('1)', '0.15)');
+    ctx.fill();
+    // ring
+    ctx.beginPath();
+    ctx.arc(p.px, p.py, 10, 0, Math.PI*2);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    // dot
+    ctx.beginPath();
+    ctx.arc(p.px, p.py, 4, 0, Math.PI*2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    // label
+    ctx.font = 'bold 13px Space Mono, monospace';
+    ctx.fillStyle = color;
+    ctx.fillText(label, p.px + 14, p.py - 8);
+  };
+
+  if (pointA) drawPoint(pointA, 'rgba(0,230,118,1)', 'A');
+
+  if (pointA && pointB) {
+    // dashed line
+    ctx.beginPath();
+    ctx.setLineDash([8, 5]);
+    ctx.moveTo(pointA.px, pointA.py);
+    ctx.lineTo(pointB.px, pointB.py);
+    ctx.strokeStyle = 'rgba(255,194,51,0.85)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // midpoint label
+    const mx = (pointA.px + pointB.px) / 2;
+    const my = (pointA.py + pointB.py) / 2;
+    ctx.fillStyle = 'rgba(10,14,26,0.7)';
+    ctx.fillRect(mx - 36, my - 16, 72, 22);
+    ctx.fillStyle = '#ffc233';
+    ctx.font = 'bold 12px Space Mono, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('วัดระยะ...', mx, my - 1);
+    ctx.textAlign = 'left';
+  }
+
+  if (pointB) drawPoint(pointB, 'rgba(255,107,157,1)', 'B');
+}
+
+function updateDistOverlayWithResult(value, unit) {
+  if (!pointA || !pointB) return;
+  const dc = document.getElementById('distCanvas');
+  const ctx = dc.getContext('2d');
+  // redraw with result
+  ctx.clearRect(0, 0, dc.width, dc.height);
+
+  const drawPoint = (p, color, label) => {
+    ctx.beginPath(); ctx.arc(p.px, p.py, 18, 0, Math.PI*2);
+    ctx.fillStyle = color.replace('1)', '0.15)'); ctx.fill();
+    ctx.beginPath(); ctx.arc(p.px, p.py, 10, 0, Math.PI*2);
+    ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.stroke();
+    ctx.beginPath(); ctx.arc(p.px, p.py, 4, 0, Math.PI*2);
+    ctx.fillStyle = color; ctx.fill();
+    ctx.font = 'bold 13px Space Mono, monospace';
+    ctx.fillStyle = color;
+    ctx.fillText(label, p.px + 14, p.py - 8);
+  };
+
+  // line
+  ctx.beginPath(); ctx.setLineDash([8,5]);
+  ctx.moveTo(pointA.px, pointA.py);
+  ctx.lineTo(pointB.px, pointB.py);
+  ctx.strokeStyle = 'rgba(255,194,51,0.9)'; ctx.lineWidth = 2.5; ctx.stroke();
+  ctx.setLineDash([]);
+
+  // distance label at midpoint
+  const mx = (pointA.px + pointB.px) / 2;
+  const my = (pointA.py + pointB.py) / 2;
+  const label = value + ' ' + unit;
+  ctx.font = 'bold 14px Space Mono, monospace';
+  const tw = ctx.measureText(label).width;
+  ctx.fillStyle = 'rgba(10,14,26,0.85)';
+  ctx.fillRect(mx - tw/2 - 10, my - 18, tw + 20, 26);
+  ctx.fillStyle = '#ffc233';
+  ctx.textAlign = 'center';
+  ctx.fillText(label, mx, my - 1);
+  ctx.textAlign = 'left';
+
+  drawPoint(pointA, 'rgba(0,230,118,1)', 'A');
+  drawPoint(pointB, 'rgba(255,107,157,1)', 'B');
+}
+
+function updateStepUI() {
+  const s1 = document.getElementById('step1num');
+  const s2 = document.getElementById('step2num');
+  const s3 = document.getElementById('step3num');
+
+  if (distPhase === 'idle' || distPhase === 'captured') {
+    s1.className = 'step-num active'; s2.className = 'step-num'; s3.className = 'step-num';
+  } else if (distPhase === 'pointA') {
+    s1.className = 'step-num done'; s2.className = 'step-num active'; s3.className = 'step-num';
+  } else if (distPhase === 'pointB') {
+    s1.className = 'step-num done'; s2.className = 'step-num done'; s3.className = 'step-num active';
+  } else {
+    s1.className = 'step-num done'; s2.className = 'step-num done'; s3.className = 'step-num done';
+  }
+}
+
+async function analyzeDistance() {
+  const overlay = document.getElementById('processingOverlay');
+  overlay.classList.add('show');
+
+  // loading state
+  const dv = document.getElementById('distValue');
+  dv.textContent = '···'; dv.className = 'dist-big loading';
+  document.getElementById('distUnitLabel').textContent = 'กำลังวิเคราะห์…';
+  document.getElementById('distSub').textContent = '';
+  document.getElementById('distConfPct').textContent = '—';
+  document.getElementById('distConfFill').style.width = '0%';
+  document.getElementById('distNotes').textContent = 'กำลังวิเคราะห์ภาพ…';
+  document.getElementById('distNotes').className = 'ai-notes-text';
+
+  const msgs = ['LOCATING POINTS…', 'ESTIMATING DEPTH…', 'COMPUTING DISTANCE…'];
+  let mi = 0;
+  const msgInterval = setInterval(() => {
+    document.getElementById('processingMsg').textContent = msgs[mi++ % msgs.length];
+  }, 900);
+
+  const refDesc = document.getElementById('distRefName').value || 'ความสูงคน (1.7 เมตร)';
+  const unit = activeDistUnit;
+  const base64 = capturedImageData.split(',')[1];
+
+  // Send pixel positions as percentage of image
+  const pAx = Math.round(pointA.x * 100);
+  const pAy = Math.round(pointA.y * 100);
+  const pBx = Math.round(pointB.x * 100);
+  const pBy = Math.round(pointB.y * 100);
+
+  const prompt = `You are an expert distance estimator from images.
+
+The user tapped two points on this image:
+- Point A: approximately ${pAx}% from left, ${pAy}% from top
+- Point B: approximately ${pBx}% from left, ${pBy}% from top
+
+Reference object visible in the scene: "${refDesc}"
+Requested output unit: ${unit}
+
+Your task: estimate the real-world distance between point A and point B.
+
+Use the reference object to calibrate your estimate. Consider:
+1. Perspective and depth cues in the image
+2. The relative sizes of known objects
+3. The scene context (indoor/outdoor, floor, walls, etc.)
+
+Return ONLY valid JSON (no markdown):
+{
+  "distance": "3.5",
+  "unit": "${unit}",
+  "confidence": 0.75,
+  "point_a_desc": "สั้นๆ ว่าจุด A อยู่ที่ไหน (ไทย)",
+  "point_b_desc": "สั้นๆ ว่าจุด B อยู่ที่ไหน (ไทย)",
+  "notes": "คำอธิบาย 1-2 ประโยค ภาษาไทย เกี่ยวกับวิธีประมาณและความแม่นยำ"
+}
+
+distance is a string with 1 decimal place. confidence 0.0-1.0. notes in Thai.`;
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6', max_tokens: 1000,
+        messages: [{role:'user', content:[
+          {type:'image', source:{type:'base64', media_type:'image/jpeg', data:base64}},
+          {type:'text', text:prompt}
+        ]}]
+      })
+    });
+    clearInterval(msgInterval);
+    const data = await response.json();
+    if (data.error) throw new Error(data.error.message);
+    const raw = data.content.map(c=>c.text||'').join('');
+    const parsed = JSON.parse(raw.replace(/```json|```/g,'').trim());
+
+    overlay.classList.remove('show');
+
+    dv.textContent = parsed.distance;
+    dv.className = 'dist-big';
+    document.getElementById('distUnitLabel').textContent = parsed.unit || unit;
+    document.getElementById('distSub').textContent =
+      (parsed.point_a_desc ? 'A: ' + parsed.point_a_desc : '') +
+      (parsed.point_b_desc ? '  →  B: ' + parsed.point_b_desc : '');
+
+    const conf = Math.round((parsed.confidence || 0.7) * 100);
+    document.getElementById('distConfPct').textContent = conf + '%';
+    document.getElementById('distConfFill').style.width = conf + '%';
+
+    const dn = document.getElementById('distNotes');
+    dn.textContent = parsed.notes || 'วิเคราะห์เสร็จสิ้น';
+    dn.className = 'ai-notes-text loaded';
+
+    updateDistOverlayWithResult(parsed.distance, parsed.unit || unit);
+    setStatus('live', 'วิเคราะห์เสร็จสิ้น');
+    showToast('✅ วัดระยะสำเร็จ: ' + parsed.distance + ' ' + (parsed.unit || unit), 'success');
+    distPhase = 'done';
+
+  } catch(err) {
+    clearInterval(msgInterval);
+    overlay.classList.remove('show');
+    setStatus('error', 'เกิดข้อผิดพลาด');
+    showToast('❌ ' + err.message, 'error');
+    dv.textContent = '—'; dv.className = 'dist-big';
+    document.getElementById('distNotes').textContent = 'เกิดข้อผิดพลาด: ' + err.message;
+    distPhase = 'pointA'; // allow retry
+    document.getElementById('distHint').textContent = '📍 แตะจุด A ใหม่อีกครั้ง';
+    document.getElementById('distHint').classList.add('show');
+  }
+}
+
+function clearPoints() {
+  pointA = null; pointB = null;
+  distPhase = 'pointA';
+  const dc = document.getElementById('distCanvas');
+  dc.getContext('2d').clearRect(0, 0, dc.width, dc.height);
+  document.getElementById('pointALabel').textContent = 'ยังไม่ได้เลือก';
+  document.getElementById('pointBLabel').textContent = 'ยังไม่ได้เลือก';
+  document.getElementById('distValue').textContent = '—';
+  document.getElementById('distValue').className = 'dist-big';
+  document.getElementById('distUnitLabel').textContent = 'แตะสองจุดเพื่อวัดระยะ';
+  document.getElementById('distSub').textContent = '';
+  document.getElementById('distConfPct').textContent = '—';
+  document.getElementById('distConfFill').style.width = '0%';
+  document.getElementById('distNotes').textContent = 'เลือกจุดใหม่บนภาพ';
+  document.getElementById('distNotes').className = 'ai-notes-text';
+  document.getElementById('distHint').textContent = '📍 แตะจุด A (จุดเริ่มต้น)';
+  document.getElementById('distHint').classList.add('show');
+  updateStepUI();
+}
+
+// ── Shared helpers ──
+function showCapturedImage(imgData) {
+  const capturedImg = document.getElementById('capturedImg');
+  capturedImg.src = imgData;
+  capturedImg.style.display = 'block';
+  document.getElementById('videoEl').style.display = 'none';
+  document.getElementById('viewfinder').classList.remove('active');
+  document.getElementById('captureBtn').style.display = 'none';
+  document.getElementById('retakeBtn').style.display = '';
+  document.getElementById('startBtn').style.display = 'none';
+}
+
+function retake() {
+  // reset canvas
+  hideDistCanvas();
+  const dc = document.getElementById('distCanvas');
+  dc.getContext('2d').clearRect(0, 0, dc.width, dc.height);
+
+  document.getElementById('capturedImg').style.display = 'none';
+  document.getElementById('capturedImg').src = '';
+  document.getElementById('videoEl').style.display = 'block';
+  document.getElementById('viewfinder').classList.add('active');
+  document.getElementById('captureBtn').style.display = '';
+  document.getElementById('captureBtn').disabled = false;
+  document.getElementById('retakeBtn').style.display = 'none';
+  document.getElementById('clearPtsBtn').style.display = 'none';
+
+  capturedImageData = null;
+  pointA = null; pointB = null;
+  distPhase = 'idle';
+
+  // reset size results
+  ['W','H','D'].forEach(k => {
+    document.getElementById('val'+k).textContent = '—';
+    document.getElementById('val'+k).className = 'dim-value';
+    document.getElementById('unit'+k).textContent = '';
+    document.getElementById('card'+k).classList.remove('has-value');
+  });
+  document.getElementById('confPct').textContent = '—';
+  document.getElementById('confFill').style.width = '0%';
+  document.getElementById('aiNotes').textContent = 'ถ่ายภาพวัตถุพร้อมวัตถุอ้างอิงเพื่อให้ AI วิเคราะห์ขนาด';
+  document.getElementById('aiNotes').className = 'ai-notes-text';
+
+  // reset dist results
+  document.getElementById('distValue').textContent = '—';
+  document.getElementById('distValue').className = 'dist-big';
+  document.getElementById('distUnitLabel').textContent = 'แตะสองจุดเพื่อวัดระยะ';
+  document.getElementById('distSub').textContent = '';
+  document.getElementById('distConfPct').textContent = '—';
+  document.getElementById('distConfFill').style.width = '0%';
+  document.getElementById('distNotes').textContent = 'เลือกโหมดวัดระยะและถ่ายภาพฉากที่ต้องการ';
+  document.getElementById('distNotes').className = 'ai-notes-text';
+  document.getElementById('pointALabel').textContent = 'ยังไม่ได้เลือก';
+  document.getElementById('pointBLabel').textContent = 'ยังไม่ได้เลือก';
+  updateStepUI();
+
+  setStatus('live', 'กล้องพร้อมใช้งาน');
+}
+</script>
+</body>
+</html>
